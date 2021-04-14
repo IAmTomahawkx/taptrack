@@ -1,0 +1,4 @@
+discord.py
+aiohttp
+tabulate
+git+https://github.com/shineydev/prettify.py.git
