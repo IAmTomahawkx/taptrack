@@ -26,10 +26,10 @@ class AbstractState:
         self.__cog = cog
 
     async def _put(self, record: Record) -> int:
-        raise NotImplemented
+        raise NotImplementedError
 
     async def _add_occurrence(self, record_id: int, message: dict):
-        raise NotImplemented
+        raise NotImplementedError
 
     async def put_error(self, ctx: commands.Context, error: Exception) -> Record:
         trace = list(formatter.format_traceback(error.__traceback__))
@@ -50,13 +50,19 @@ class AbstractState:
             return record
 
     async def _get_by_value(self, tb: types.TracebackType, args: List[str]) -> Optional[Record]:
-        raise NotImplemented
+        raise NotImplementedError
 
     async def _get(self, record_id: int) -> Optional[Record]:
-        raise NotImplemented
+        raise NotImplementedError
 
     async def get_error(self, record_id: int) -> Optional[Record]:
         return await self._get(record_id)
+
+    async def set_handled(self, record_id: int, state: bool) -> Optional[Record]:
+        raise NotImplementedError
+
+    async def get_all_unhandled(self) -> List[Record]:
+        raise NotImplementedError
 
 
 class PostgresState(AbstractState):
@@ -69,12 +75,14 @@ class PostgresState(AbstractState):
         occurrences int not null default 1,
         occurred_at timestamp without time zone not null,
         messages jsonb[] not null,
+        handled bool not null,
         tracking_filename text not null,
-        tracking_function text not null
+        tracking_function text not null,
+        unique (tracking_filename, tracking_function, args)
     );
     """
     def __init__(self, cog: "TapTrack"):
-        super(PostgresState, self).__init__(cog)
+        super().__init__(cog)
         dsn = os.getenv("TAPTRACKS_DB_URI", None)
         if not dsn:
             raise TapTracksError("TAPTRACKS_DB_URI environment variable was empty")
@@ -102,8 +110,14 @@ class PostgresState(AbstractState):
                 OR args = $3
             )
         """
-        data = await self.do_query(query, tb.tb_frame.f_code.co_filename, tb.tb_frame.f_code.co_name, args)
-        print(tb.tb_frame.f_code.co_filename, tb.tb_frame.f_code.co_name, args)
+        def _get_last_frame(_frame):
+            if _frame.tb_next:
+                return _get_last_frame(_frame.tb_next)
+            return _frame
+
+        frame = _get_last_frame(tb)
+        data = await self.do_query(query, frame.tb_frame.f_code.co_filename, frame.tb_frame.f_code.co_name, args)
+        print(frame.tb_frame.f_code.co_filename, frame.tb_frame.f_code.co_name, args)
         if not data:
             print("none")
             return None
@@ -132,9 +146,9 @@ class PostgresState(AbstractState):
     async def _put(self, record: Record) -> int:
         query = """
         INSERT INTO taptrack_errors
-            (stack, frames, args, occurrences, occurred_at, messages, tracking_filename, tracking_function)
+            (stack, frames, args, occurrences, occurred_at, messages, handled, tracking_filename, tracking_function)
         VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING
             id
         """
@@ -147,6 +161,7 @@ class PostgresState(AbstractState):
             serial['occurrences'],
             serial['occurred_at'],
             serial['messages'],
+            serial['handled'],
             serial['tracking_filename'],
             serial['tracking_function']
         )
@@ -162,3 +177,31 @@ class PostgresState(AbstractState):
             id = $1
         """
         await self.do_query(query, record_id, _dumps(message))
+
+    async def set_handled(self, record_id: int, state: bool) -> Optional[Record]:
+        query = """
+        UPDATE taptrack_errors
+        SET
+            handled = $2
+        WHERE
+            id = $1
+        RETURNING
+            *
+        """
+        data = await self.do_query(query, record_id, state)
+        if not data:
+            return None
+
+        rec = Record.from_psql(data[0])
+        return rec
+
+    async def get_all_unhandled(self) -> List[Record]:
+        query = """
+        SELECT
+            *
+        FROM taptrack_errors
+        WHERE
+            handled = false
+        """
+        data = await self.do_query(query)
+        return [Record.from_psql(x) for x in data]

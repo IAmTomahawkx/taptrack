@@ -148,14 +148,18 @@ class Record:
     ):
         self.id = None
         self.stack = stack or list(formatter.format_exception(type(exception), exception, exception.__traceback__))
+        if self.stack[-1] == "\n":
+            self.stack.pop()
+
         self.args = [str(x) for x in exception.args]
-        self.occurred_at = occurred_at
+        self.occurred_at = occurred_at.replace(tzinfo=None)
         self.frames = _serialize_traceback(exception.__traceback__)
 
         self._tracking_filename = self.frames[-1]['filename']
         self._tracking_function = self.frames[-1]['function']
 
         self.occurrences = 1
+        self.handled = False
         self.messages = [_serialize_message(message)]
 
     @classmethod
@@ -163,6 +167,7 @@ class Record:
         data = _loads(data)
         self = cls.__new__(cls)
         self.id = data['id']
+        self.handled = data['handled']
         self.stack = _loads(data['stack'])
         self.frames = _loads(data['frames'])
         self.args = data['args']
@@ -178,6 +183,7 @@ class Record:
     def from_psql(cls, data: Any) -> "Record":
         self = cls.__new__(cls)
         self.id = data['id']
+        self.handled = data['handled']
         self.stack = _loads(data['stack'])
         self.frames = _loads(data['frames'])
         self.args = data['args']
@@ -193,6 +199,7 @@ class Record:
         return {
             "id": self.id,
             "stack": _dumps(self.stack),
+            "handled": self.handled,
             "frames": _dumps(self.frames),
             "args": self.args,
             "occurred_at": self.occurred_at if not strict else self.occurred_at.isoformat(),
