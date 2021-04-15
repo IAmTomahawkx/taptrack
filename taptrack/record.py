@@ -1,6 +1,6 @@
 import datetime
 import types
-from typing import List, Dict, Union, Any
+from typing import List, Dict, Union, Any, Optional
 
 import discord
 import prettify_exceptions
@@ -78,9 +78,38 @@ def _serialize_attachments(message: discord.Message):
             "spoiler": atch.is_spoiler()
         })
 
+def _serialize_stickers(message: discord.Message) -> list:
+    return [
+        {
+            "id": x.id,
+            "name": x.name,
+            "description": x.description,
+            "pack": x.pack_id,
+            "image": x.image,
+            "preview_image": x.preview_image,
+            "tags": x.tags,
+            "format": x.format.value
+        } for x in message.stickers
+    ]
+
+def _serialize_reference(message: discord.Message) -> Optional[dict]:
+    return message.reference.to_dict() if message.reference else None
+
+
 def _serialize_message(message: discord.Message) -> dict:
     return {
+        "id": message.id,
+        "webhook_id": message.webhook_id,
         "content": message.content,
+        "pinned": message.pinned,
+        "flags": message.flags.value,
+        "mention_everyone": message.mention_everyone,
+        "mentions": message.raw_mentions,
+        "channel_mentions": message.raw_channel_mentions,
+        "role_mentions": message.raw_role_mentions,
+        "reference": _serialize_reference(message),
+        "stickers": _serialize_stickers(message),
+        "embeds": [e.to_dict() for e in message.embeds],
         "author": _serialize_user(message.author),
         "channel": _serialize_channel(message.channel),
         "guild": message.guild and _serialize_guild(message.guild),
@@ -148,8 +177,8 @@ class Record:
     ):
         self.id = None
         self.stack = stack or list(formatter.format_exception(type(exception), exception, exception.__traceback__))
-        if self.stack[-1] == "\n":
-            self.stack.pop()
+        while "\n" in self.stack:
+            self.stack.remove("\n")
 
         self.args = [str(x) for x in exception.args]
         self.occurred_at = occurred_at.replace(tzinfo=None)

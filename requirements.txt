@@ -2,3 +2,4 @@ discord.py
 aiohttp
 tabulate
 git+https://github.com/shineydev/prettify.py.git
+git+https://github.com/Rapptz/discord-ext-menus.git

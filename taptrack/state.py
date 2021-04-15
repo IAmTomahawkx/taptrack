@@ -32,7 +32,6 @@ class AbstractState:
         raise NotImplementedError
 
     async def put_error(self, ctx: commands.Context, error: Exception) -> Record:
-        trace = list(formatter.format_traceback(error.__traceback__))
         exists = await self._get_by_value(error.__traceback__, [str(x) for x in error.args])
         if exists:
             await self._add_occurrence(exists.id, _serialize_message(ctx.message))
@@ -42,7 +41,6 @@ class AbstractState:
             record = Record(
                 error,
                 ctx.message,
-                stack=trace,
                 occurred_at=ctx.message.created_at
             )
             record_id = await self._put(record)
