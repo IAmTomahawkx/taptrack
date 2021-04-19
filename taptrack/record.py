@@ -4,6 +4,7 @@ from typing import List, Dict, Union, Any, Optional
 
 import discord
 import prettify_exceptions
+from discord.ext import commands
 
 formatter = prettify_exceptions.DefaultFormatter()
 formatter.theme['_ansi_enabled'] = False
@@ -95,7 +96,6 @@ def _serialize_stickers(message: discord.Message) -> list:
 def _serialize_reference(message: discord.Message) -> Optional[dict]:
     return message.reference.to_dict() if message.reference else None
 
-
 def _serialize_message(message: discord.Message) -> dict:
     return {
         "id": message.id,
@@ -117,6 +117,16 @@ def _serialize_message(message: discord.Message) -> dict:
         "attachments": _serialize_attachments(message)
     }
 
+def _serialize_context(ctx: commands.Context) -> dict:
+    return {
+        "message": _serialize_message(ctx.message),
+        "args": [_default_serialization(x) for x in ctx.args if type(x) != commands.Context],
+        "kwargs": {x: _default_serialization(y) for x, y in ctx.kwargs.items()},
+        "prefix": ctx.prefix,
+        "invoked_with": ctx.invoked_with,
+        "command": ctx.command and ctx.command.qualified_name
+    }
+
 VALID_SERIALIZATIONS = {
     int: int,
     str: str,
@@ -125,10 +135,14 @@ VALID_SERIALIZATIONS = {
     discord.User: _serialize_user,
     discord.Member: _serialize_user,
     discord.TextChannel: _serialize_channel,
-    discord.Guild: _serialize_guild
+    discord.Guild: _serialize_guild,
+    commands.Context: _serialize_context
 }
 
 def _default_serialization(obj: Any) -> Union[dict, str]:
+    if type(obj) in VALID_SERIALIZATIONS:
+        return VALID_SERIALIZATIONS[type(obj)](obj)
+
     if hasattr(obj, "__taptrack_serialize__"):
         return obj.__taptrack_serialize__()
 
@@ -141,10 +155,7 @@ def _serialize_frame_scope(scope: Dict[str, Any]) -> Dict[str, Union[int, str, b
     output_scope = {}
 
     for name, value in scope.items():
-        if type(value) not in VALID_SERIALIZATIONS:
-            output_scope[name] = _default_serialization(value)
-
-        output_scope[name] = VALID_SERIALIZATIONS[type(name)](value)
+        output_scope[name] = _default_serialization(value)
 
     return output_scope
 

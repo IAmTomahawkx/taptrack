@@ -7,7 +7,7 @@ class StackFrameDataSource(menus.ListPageSource):
     def __init__(self, entries: List[dict]):
         super().__init__(entries, per_page=1)
 
-    async def format_page(self, menu, page):
+    async def format_page(self, menu: menus.Menu, page):
         data = pprint.pformat(page['scope'], indent=2)
         header = f"File \"{page['filename']}\", line {page['lineno']}, in {page['function']}\n"
         return header + "```py\n"+data + "\n```"

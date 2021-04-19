@@ -25,6 +25,9 @@ class AbstractState:
     def __init__(self, cog: "TapTrack"):
         self.__cog = cog
 
+    def eject(self):
+        raise NotImplementedError
+
     async def _put(self, record: Record) -> int:
         raise NotImplementedError
 
@@ -87,6 +90,13 @@ class PostgresState(AbstractState):
 
         self._dsn: str = dsn
         self.conn: Optional[asyncpg.Connection] = None
+
+    def eject(self):
+        async def inner():
+            if self.conn and not self.conn.is_closed():
+                await self.conn.close()
+
+        self.__cog.bot.loop.create_task(inner())
 
     async def do_query(self, query: str, *args) -> list:
         if self.conn is None:
