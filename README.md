@@ -113,7 +113,7 @@ There are more environment variables that can be set to customize TapTrack
             <code>TAPTRACK_WEBHOOK_URL</code>
         </td>
         <td>
-            If set, this should be a discord webhook URL. This will receive updates every time an error occurres,
+            If set, this should be a discord webhook URL. This will receive updates every time an error occurs,
             every time an error state is updated, etc.
         </td>
     </tr>
