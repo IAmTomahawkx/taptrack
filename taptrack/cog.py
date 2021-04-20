@@ -52,7 +52,7 @@ class TapTrack(commands.Cog):
 
         if not self._session:
             headers = {}
-            auth = os.getenv("TAPTRACK_HASTE_AUTHORIZATION", None)
+            auth = os.getenv("TAPTRACK_PASTE_AUTHORIZATION", None)
             if auth:
                 headers['Authorization'] = auth
 

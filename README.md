@@ -132,7 +132,15 @@ There are more environment variables that can be set to customize TapTrack
         <td>
             This can be used to change where the errors will go when they are too large for discord.
             The site in question must have a hastebin-like /documents endpoint that takes the text as the request body,
-            and returns a json body with a <code>key</code> key.
+            and returns a json body with a <code>key</code> key. Defaults to <a href="https://mystb.in">https://mystb.in</a>
+        </td>
+    </tr>
+    <tr>
+        <td>
+            <code>TAPTRACK_PASTE_AUTHORIZATION</code>
+        </td>
+        <td>
+            Optional Authorization header for the paste site. 
         </td>
     </tr>
 </table>
