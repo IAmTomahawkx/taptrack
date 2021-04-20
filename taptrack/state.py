@@ -1,16 +1,18 @@
 import os
 import types
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, Optional, List, Union
 
+import aiohttp
 import discord
 from discord.ext import commands
 
-from .record import Record, formatter, _serialize_message, _dumps
+from .record import Record, _serialize_message, _dumps
 from .errors import *
 
 if TYPE_CHECKING:
     from .cog import TapTrack
 
+TAPTRACK_ERROR_HOOK = os.getenv("TAPTRACK_WEBHOOK_URL", None)
 TAPTRACK_STORAGE = os.getenv("TAPTRACK_STORAGE", default="json").lower()
 if TAPTRACK_STORAGE in ("postgres", "postgresql"):
     try:
@@ -24,6 +26,57 @@ __all__ = "AbstractState",
 class AbstractState:
     def __init__(self, cog: "TapTrack"):
         self.__cog = cog
+        if TAPTRACK_ERROR_HOOK:
+            self.hook: Optional[discord.Webhook] = discord.Webhook.from_url(TAPTRACK_ERROR_HOOK, adapter=discord.AsyncWebhookAdapter(aiohttp.ClientSession()))
+        else:
+            self.hook: Optional[discord.Webhook] = None
+
+    async def webhook_send(self, content: Union[discord.Embed, str]):
+        if not self.hook:
+            return
+
+        args = {
+            "content" if isinstance(content, str) else "embed": content
+        }
+        await self.hook.send(**args)
+
+    async def webhook_put_error(self, record: Record):
+        if not self.hook:
+            return
+
+        fmt = f"A new error has occurred at {record.frames[-1]['filename']} in function {record.frames[-1]['function']}. It has been marked as #{record.id}.\n\n"
+        tb = "".join(record.stack)
+        if len(tb) >= (1990-len(fmt)):
+            fmt += "Traceback was not included as it is too long."
+        else:
+            fmt += f"```py\n{tb}\n```"
+
+        await self.webhook_send(fmt)
+
+    async def webhook_put_occurrence(self, record: Record):
+        if not self.hook:
+            return
+
+        if record.handled:
+            fmt = f"Previously handled error #{record.id} has occurred again. It has been marked as UNHANDLED, " \
+                  f"and has occurred {record.occurrences+1} times.\n\n"
+        else:
+            fmt = f"Error #{record.id} has occurred again. It has occurred {record.occurrences+1} times.\n\n"
+
+        tb = "".join(record.stack)
+        if len(tb) >= (1990 - len(fmt)):
+            fmt += "Traceback was not included as it is too long."
+        else:
+            fmt += f"```py\n{tb}\n```"
+
+        await self.webhook_send(fmt)
+
+    async def webhook_put_handled(self, record: Record, state: bool):
+        if not self.hook:
+            return
+
+        fmt = f"Error #{record.id} has been marked as {'HANDLED' if state else 'UNHANDLED'}."
+        await self.webhook_send(fmt)
 
     def eject(self):
         raise NotImplementedError
@@ -38,9 +91,10 @@ class AbstractState:
         exists = await self._get_by_value(error.__traceback__, [str(x) for x in error.args])
         if exists:
             await self._add_occurrence(exists.id, _serialize_message(ctx.message))
+            await self.webhook_put_occurrence(exists)
             return exists
-        else:
 
+        else:
             record = Record(
                 error,
                 ctx.message,
@@ -48,6 +102,7 @@ class AbstractState:
             )
             record_id = await self._put(record)
             record.id = record_id
+            await self.webhook_put_error(record)
             return record
 
     async def _get_by_value(self, tb: types.TracebackType, args: List[str]) -> Optional[Record]:
@@ -59,8 +114,15 @@ class AbstractState:
     async def get_error(self, record_id: int) -> Optional[Record]:
         return await self._get(record_id)
 
-    async def set_handled(self, record_id: int, state: bool) -> Optional[Record]:
+    async def _set_handled(self, record_id: int, state: bool) -> Optional[Record]:
         raise NotImplementedError
+
+    async def set_handled(self, record_id: int, state: bool) -> Optional[Record]:
+        record = await self._set_handled(record_id, state)
+        if record:
+            await self.webhook_put_handled(record, state)
+
+        return record
 
     async def get_all_unhandled(self) -> List[Record]:
         raise NotImplementedError
@@ -84,9 +146,9 @@ class PostgresState(AbstractState):
     """
     def __init__(self, cog: "TapTrack"):
         super().__init__(cog)
-        dsn = os.getenv("TAPTRACKS_DB_URI", None)
+        dsn = os.getenv("TAPTRACK_DB_URI", None)
         if not dsn:
-            raise TapTracksError("TAPTRACKS_DB_URI environment variable was empty")
+            raise TapTracksError("TAPTRACK_DB_URI environment variable was empty")
 
         self._dsn: str = dsn
         self.conn: Optional[asyncpg.Connection] = None
@@ -125,12 +187,9 @@ class PostgresState(AbstractState):
 
         frame = _get_last_frame(tb)
         data = await self.do_query(query, frame.tb_frame.f_code.co_filename, frame.tb_frame.f_code.co_name, args)
-        print(frame.tb_frame.f_code.co_filename, frame.tb_frame.f_code.co_name, args)
-        if not data:
-            print("none")
-            return None
 
-        print(data[0]['tracking_filename'], data[0]['tracking_function'], data[0]['args'])
+        if not data:
+            return None
 
         r = Record.from_psql(data[0])
         return r
@@ -180,13 +239,14 @@ class PostgresState(AbstractState):
         UPDATE taptrack_errors
         SET
             occurrences = occurrences + 1,
-            messages = array_append(messages, $2)
+            messages = array_append(messages, $2),
+            handled = false
         WHERE
             id = $1
         """
         await self.do_query(query, record_id, _dumps(message))
 
-    async def set_handled(self, record_id: int, state: bool) -> Optional[Record]:
+    async def _set_handled(self, record_id: int, state: bool) -> Optional[Record]:
         query = """
         UPDATE taptrack_errors
         SET
