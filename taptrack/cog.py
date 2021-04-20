@@ -22,7 +22,7 @@ class TapTrack(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._haste_cache = {}
-        self._haste_target = yarl.URL(os.getenv("TAPTRACK_HASTE_SITE", "https://mystb.in/")).with_path("documents")
+        self._haste_target = yarl.URL(os.getenv("TAPTRACK_PASTE_SITE", "https://mystb.in/")).with_path("documents")
 
         self._session = None
         if state.TAPTRACK_STORAGE in ("postgres", "postgresql"):
