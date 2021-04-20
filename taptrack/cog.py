@@ -27,8 +27,18 @@ class TapTrack(commands.Cog):
         self._session = None
         if state.TAPTRACK_STORAGE in ("postgres", "postgresql"):
             self.state = state.PostgresState(self)
-        else:
-            raise ValueError("yeet")
+
+        elif state.TAPTRACK_STORAGE.startswith("custom."):
+            stat = state.TAPTRACK_STORAGE.replace("custom.", "")
+            subs = state.AbstractState.__subclasses__()
+            self.state = None
+            for x in subs:
+                if x.__name__.lower() == stat:
+                    self.state = x(self)
+                    break
+
+            if self.state is None:
+                raise ValueError(f"TAPTRACK_STORAGE is set to {state.TAPTRACK_STORAGE} but AbstractState subclass {stat} couldn't be found")
 
     def cog_unload(self):
         self.state.eject()

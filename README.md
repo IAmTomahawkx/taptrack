@@ -36,6 +36,9 @@ TapTrack makes use of many environment variables (see [Additional environment va
                 <li>
                     <code>postgres</code> - requires package <a href="https://pypi.org/projects/asyncpg"><code>asyncpg</code></a>
                 </li>
+                <li>
+                    <code>custom.MyClass</code> - see <a href="#custom-states">Custom states</a>
+                </li>
             </list>
         </td>
     </tr>
@@ -60,6 +63,11 @@ bot.load_extension("taptrack")
 This will automatically start a listener that will track uncaught errors (Uncaught errors are errors that do not subclass
 [CommandError](https://discordpy.readthedocs.io/en/latest/ext/commands/api.html#discord.ext.commands.CommandError)).
 Additionally, this will insert the `taptrack` command into your bot. See [taptrack commands](#taptrack-commands) for more info.
+
+## Custom states
+Custom states allow you to create your own method of storing taptracks errors. This can be accomplished by subclassing `taptrack.state.AbstractState`,
+along with setting your `TAPTRACK_STORAGE` environment variable to `custom.subclassName`. For example, if your subclass
+is named `MyState`, your `TAPTRACK_STORAGE` variable would be `custom.mystate` (case-insensitive)
 
 ## taptrack commands
 <table>
