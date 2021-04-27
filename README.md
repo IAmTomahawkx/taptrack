@@ -37,6 +37,9 @@ TapTrack makes use of many environment variables (see [Additional environment va
                     <code>postgres</code> - requires package <a href="https://pypi.org/projects/asyncpg"><code>asyncpg</code></a>
                 </li>
                 <li>
+                    <code>redis</code> - requires package <a href="https://pypi.org/projects/aioredis"><code>asyncpg</code></a>
+                </li>
+                <li>
                     <code>custom.MyClass</code> - see <a href="#custom-states">Custom states</a>
                 </li>
             </list>
@@ -50,6 +53,7 @@ TapTrack makes use of many environment variables (see [Additional environment va
             This must be set if <code>TAPTRACK_STORAGE</code> is any of the following:
             <list>
                 <li><code>postgres</code></li>
+                <li><code>redis</code></li>
             </list>
             This should be a URI string that connects to your database
         </td>

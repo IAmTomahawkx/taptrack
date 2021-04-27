@@ -1,12 +1,13 @@
 import os
 import types
+import itertools
 from typing import TYPE_CHECKING, Optional, List, Union
 
 import aiohttp
 import discord
 from discord.ext import commands
 
-from .record import Record, _serialize_message, _dumps
+from .record import Record, _serialize_message, _dumps, _loads
 from .errors import *
 
 if TYPE_CHECKING:
@@ -20,8 +21,20 @@ if TAPTRACK_STORAGE in ("postgres", "postgresql"):
     except:
         raise MissingDependency(f"TAPTRACK_STORAGE is set to {TAPTRACK_STORAGE} but dependency 'asyncpg' is not installed")
 
+elif TAPTRACK_STORAGE == "redis":
+    try:
+        import aioredis
+    except:
+        raise MissingDependency(f"TAPTRACK_STORAGE is set to {TAPTRACK_STORAGE} but dependency 'aioredis' is not installed")
 
-__all__ = "AbstractState",
+
+__all__ = "AbstractState", "PostgresState", "RedisState"
+
+
+def _get_last_frame(_frame):
+    if _frame.tb_next:
+        return _get_last_frame(_frame.tb_next)
+    return _frame
 
 class AbstractState:
     def __init__(self, cog: "TapTrack"):
@@ -119,7 +132,7 @@ class AbstractState:
 
     async def set_handled(self, record_id: int, state: bool) -> Optional[Record]:
         record = await self._set_handled(record_id, state)
-        if record:
+        if record and record is not True:
             await self.webhook_put_handled(record, state)
 
         return record
@@ -180,10 +193,6 @@ class PostgresState(AbstractState):
                 OR args = $3
             )
         """
-        def _get_last_frame(_frame):
-            if _frame.tb_next:
-                return _get_last_frame(_frame.tb_next)
-            return _frame
 
         frame = _get_last_frame(tb)
         data = await self.do_query(query, frame.tb_frame.f_code.co_filename, frame.tb_frame.f_code.co_name, args)
@@ -273,3 +282,106 @@ class PostgresState(AbstractState):
         """
         data = await self.do_query(query)
         return [Record.from_psql(x) for x in data]
+
+
+class RedisState(AbstractState):
+    def __init__(self, cog: "TapTrack"):
+        super().__init__(cog)
+
+        dsn = os.getenv("TAPTRACK_DB_URI", None)
+        if not dsn:
+            raise TapTracksError("TAPTRACK_DB_URI environment variable was empty")
+
+        self._dsn: str = dsn
+        self.conn: Optional[aioredis.Redis] = None
+
+    async def _connect(self):
+        if not self.conn:
+            self.conn = await aioredis.create_redis_pool(self._dsn)
+
+    async def eject(self):
+        if self.conn:
+            await self.conn.close()
+
+    async def _get(self, record_id: int) -> Optional[Record]:
+        if not self.conn:
+            await self._connect()
+
+        data = await self.conn.hgetall(f"TAPTRACK_RECORD:{record_id}")
+        if not data:
+            return None
+
+        data = Record.from_json(data)
+        return data
+
+    async def _get_by_value(self, tb: types.TracebackType, args: List[str]) -> Optional[Record]:
+        if not self.conn:
+            await self._connect()
+
+        frame = _get_last_frame(tb)
+
+        # file name + function name
+        v = f"TAPTRACK_INDEX:FNFN:{frame.tb_frame.f_code.co_filename + '//' + frame.tb_frame.f_code.co_name}"
+        data = await self.conn.get(v)
+        if not data:
+            # file name + args
+            v = f"TAPTRACK_INDEX:FNFN:{frame.tb_frame.f_code.co_filename + '//' + str(args)}"
+            data = await self.conn.get(v)
+            if not data:
+                return None
+
+        data = await self.conn.hgetall(f"TAPTRACK_RECORD:{data.decode()}")
+
+        record = Record.from_json(data)
+        return record
+
+    async def _put(self, record: Record) -> int:
+        if not self.conn:
+            await self._connect()
+
+        r_id = await self.conn.incr("TAPTRACK_INDEX_NEXTID") - 1
+        record.id = r_id
+        r = record._to_dict(strict=True)
+        data = list(itertools.chain.from_iterable(r.items()))
+        await self.conn.execute("HMSET", f"TAPTRACK_RECORD:{r_id}", *data)
+        await self.conn.sadd("TAPTRACK_UNHANDLED", r_id)
+        await self.conn.set(f"TAPTRACK_INDEX:FNFN:{record._tracking_filename + '//' + record._tracking_function}", r_id)
+        await self.conn.set(f"TAPTRACK_INDEX:FNAR:{record._tracking_filename + '//' + str(record.args)}", r_id)
+
+        return r_id
+
+    async def _add_occurrence(self, record_id: int, message: dict):
+        if not self.conn:
+            await self._connect()
+
+        await self.conn.hincrby(f"TAPTRACK_RECORD:{record_id}", "occurrences", 1)
+        msgs = await self.conn.hget(f"TAPTRACK_RECORD:{record_id}", "messages")
+        msgs = msgs.decode()
+        data = _loads(msgs)
+        data.append(message)
+        await self.conn.hset(f"TAPTRACK_RECORD:{record_id}", "messages", _dumps(data))
+
+    async def _set_handled(self, record_id: int, state: bool) -> Optional[bool]:
+        if not self.conn:
+            await self._connect()
+
+        await self.conn.hset(f"TAPTRACK_RECORD:{record_id}", "handled", int(state))
+        if state:
+            await self.conn.srem("TAPTRACK_UNHANDLED", record_id)
+        else:
+            await self.conn.sadd("TAPTRACK_UNHANDLED", record_id)
+
+        return True # TODO: make note that redis mode will never return a record from here
+
+    async def get_all_unhandled(self) -> List[Record]:
+        if not self.conn:
+            await self._connect()
+
+        unhandled = [x.decode() for x in await self.conn.smembers("TAPTRACK_UNHANDLED")]
+
+        resp = []
+        for no in unhandled:
+            data = await self.conn.hgetall(f"TAPTRACK_RECORD:{no}")
+            resp.append(Record.from_json(data))
+
+        return resp

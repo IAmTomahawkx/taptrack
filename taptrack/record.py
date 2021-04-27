@@ -203,17 +203,17 @@ class Record:
         self.messages = [_serialize_message(message)]
 
     @classmethod
-    def from_json(cls, data: str) -> "Record":
-        data = _loads(data)
+    def from_json(cls, data: Union[str, dict]) -> "Record":
+        data = _loads(data) if isinstance(data, str) else {x.decode(): y.decode() if isinstance(y, bytes) else y for x, y in data.items()}
         self = cls.__new__(cls)
-        self.id = data['id']
-        self.handled = data['handled']
+        self.id = int(data['id'])
+        self.handled = bool(int(data['handled']))
         self.stack = _loads(data['stack'])
         self.frames = _loads(data['frames'])
-        self.args = data['args']
-        self.occurrences = data['occurrences']
+        self.args = _loads(data['args'])
+        self.occurrences = int(data['occurrences'])
         self.occurred_at = datetime.datetime.fromisoformat(data['occurred_at'])
-        self.messages = [_loads(x) for x in data['messages']]
+        self.messages = [_loads(x) if isinstance(x, str) else x for x in _loads(data['messages'])]
         self._tracking_filename = data['tracking_filename']
         self._tracking_function = data['tracking_function']
 
@@ -239,12 +239,12 @@ class Record:
         return {
             "id": self.id,
             "stack": _dumps(self.stack),
-            "handled": self.handled,
+            "handled": int(self.handled) if strict else self.handled,
             "frames": _dumps(self.frames),
-            "args": self.args,
+            "args": _dumps(self.args) if strict else self.args,
             "occurred_at": self.occurred_at if not strict else self.occurred_at.isoformat(),
             "occurrences": self.occurrences,
-            "messages": [_dumps(x) for x in self.messages],
+            "messages": _dumps([_dumps(x) for x in self.messages]) if strict else [_dumps(x) for x in self.messages],
             "tracking_filename": self._tracking_filename,
             "tracking_function": self._tracking_function
         }

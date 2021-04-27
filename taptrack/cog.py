@@ -28,6 +28,9 @@ class TapTrack(commands.Cog):
         if state.TAPTRACK_STORAGE in ("postgres", "postgresql"):
             self.state = state.PostgresState(self)
 
+        elif state.TAPTRACK_STORAGE == "redis":
+            self.state = state.RedisState(self)
+
         elif state.TAPTRACK_STORAGE.startswith("custom."):
             stat = state.TAPTRACK_STORAGE.replace("custom.", "")
             subs = state.AbstractState.__subclasses__()
@@ -78,6 +81,8 @@ class TapTrack(commands.Cog):
                 await self.state.put_error(context, exception.original)
             except Exception as e:
                 print("".join(formatter.format_exception(type(e), e, e.__traceback__)))
+            else:
+                print("".join(formatter.format_exception(type(exception), exception, exception.__traceback__)))
 
     async def cog_check(self, ctx: commands.Context) -> bool:
         return await commands.is_owner().predicate(ctx)
@@ -137,11 +142,11 @@ class TapTrack(commands.Cog):
 
             await ctx.send(f"Error #{error_no} is {'HANDLED' if error.handled else 'UNHANDLED'}")
         else:
-            error = await self.state.set_handled(error_no, handled)
-            if not error:
+            e = await self.state.set_handled(error_no, handled)
+            if not e:
                 return await ctx.send(f"Error #{error_no} does not exist.")
 
-            await ctx.send(f"Error #{error_no} is now {'HANDLED' if error.handled else 'UNHANDLED'}")
+            await ctx.send(f"Error #{error_no} is now {'HANDLED' if handled else 'UNHANDLED'}")
 
     @_core.command("trace")
     async def _core_traceback(self, ctx: commands.Context, error_no: int):
